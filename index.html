@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMG→SVG — Raster to Vector Converter</title>
+<meta name="description" content="Convert any raster image (PNG, JPG, WebP) into a scalable vector SVG, right in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Crect width='26' height='26' fill='%23151515'/%3E%3Ccircle cx='13' cy='13' r='2.4' fill='%234d6bff'/%3E%3Cg stroke='%23c8c8c8' stroke-width='1.4'%3E%3Cpath d='M13 1v6M13 19v6M1 13h6M19 13h6M4.5 4.5l4.2 4.2M17.3 17.3l4.2 4.2M21.5 4.5l-4.2 4.2M8.7 17.3l-4.2 4.2'/%3E%3C/g%3E%3C/svg%3E"><link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.14 0.005 95);
+  --bg-panel: oklch(0.16 0.005 95);
+  --line: oklch(0.28 0.005 95);
+  --line-soft: oklch(0.23 0.005 95);
+  --text: oklch(0.78 0.005 95);
+  --text-dim: oklch(0.58 0.005 95);
+  --text-strong: oklch(0.93 0.004 95);
+  --accent: oklch(0.62 0.21 268);
+  --accent-ink: oklch(0.98 0.005 95);
+  --danger: oklch(0.68 0.19 25);
+  --font-ui: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{min-height:100dvh}
+body{
+  font:400 16px/1.6 var(--font-ui);
+  color:var(--text);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+  height:100dvh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{cursor:pointer;font-family:inherit}
+img,svg{display:block;max-width:100%}
+::selection{background:var(--accent);color:var(--accent-ink)}
+
+/* ---------- header ---------- */
+header{
+  position:relative;z-index:2;
+  display:flex;align-items:center;gap:24px;
+  padding:0 24px;
+  height:64px;
+  border-bottom:1px solid var(--line);
+  flex-wrap:wrap;
+}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand svg{flex:none}
+.wordmark{
+  font:500 20px/1 var(--font-ui);
+  color:var(--text-strong);
+  letter-spacing:.02em;
+  white-space:nowrap;
+}
+.wordmark .arrow{color:var(--accent)}
+.engine-tag{
+  font:500 11px/1 var(--font-mono);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  border:1px solid var(--line);
+  padding:6px 10px;
+  white-space:nowrap;
+}
+.head-meta{
+  margin-left:auto;
+  font:400 11px/1.5 var(--font-mono);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  display:flex;gap:20px;align-items:center;
+}
+.head-meta .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:8px;vertical-align:1px}
+
+/* ---------- main split ---------- */
+main{
+  position:relative;z-index:1;
+  flex:1;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 340px;
+  min-height:0;
+}
+main>*{min-height:0}
+@media (max-width:900px){
+  main{grid-template-columns:1fr}
+}
+
+/* ---------- workspace (left) ---------- */
+.workspace{
+  display:flex;flex-direction:column;
+  min-width:0;
+  min-height:0;
+  border-right:1px solid var(--line);
+}
+@media (max-width:900px){.workspace{border-right:none;border-bottom:1px solid var(--line)}}
+
+.stage{
+  flex:1;
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  min-height:0;
+  background:
+    repeating-conic-gradient(oklch(0.19 0.005 95) 0% 25%, oklch(0.15 0.005 95) 0% 50%) 0 0/24px 24px;
+  overflow:hidden;
+}
+
+/* dropzone */
+.dropzone{
+  width:min(520px,100%);
+  border:1px dashed var(--line);
+  background:oklch(0.15 0.005 95 / .72);
+  padding:56px 32px;
+  text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:16px;
+  transition:border-color .2s ease, background .2s ease;
+  cursor:pointer;
+}
+.dropzone:hover,.dropzone.dragging{
+  border-color:var(--accent);
+  background:oklch(0.17 0.01 268 / .35);
+}
+.dropzone .dz-title{
+  font:500 20px/1.3 var(--font-ui);
+  color:var(--text-strong);
+}
+.dropzone .dz-sub{
+  font:400 12px/1.7 var(--font-mono);
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+.dropzone .dz-browse{
+  font:500 12px/1 var(--font-mono);
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--accent-ink);
+  background:var(--accent);
+  border:1px solid var(--accent);
+  padding:12px 22px;
+  transition:transform .15s ease;
+}
+.dropzone:hover .dz-browse{transform:translateY(-1px)}
+
+/* compare view */
+.compare{
+  position:relative;
+  max-width:100%;
+  max-height:100%;
+  border:1px solid var(--line);
+  background:oklch(0.12 0.005 95);
+  user-select:none;
+  touch-action:none;
+  display:none;
+}
+.compare.ready{display:block}
+.compare .layer{position:absolute;inset:0}
+.compare .layer img,.compare .layer svg{width:100%;height:100%;object-fit:fill}
+.compare .layer.svg-layer{background:
+    repeating-conic-gradient(#2a2a2a 0% 25%, #1e1e1e 0% 50%) 0 0/20px 20px;
+  clip-path:inset(0 calc(100% - var(--split,50%)) 0 0);
+}
+.compare .divider{
+  position:absolute;top:0;bottom:0;left:var(--split,50%);
+  width:1px;background:var(--text-strong);
+  cursor:ew-resize;
+  z-index:3;
+}
+.compare .divider::after{
+  content:"◂ ▸";
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  font:400 10px/1 var(--font-mono);
+  letter-spacing:2px;
+  color:var(--text-strong);
+  background:var(--bg);
+  border:1px solid var(--text-strong);
+  padding:8px 6px;
+  white-space:nowrap;
+}
+.compare .tag{
+  position:absolute;top:12px;
+  font:500 10px/1 var(--font-mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--text-strong);
+  background:oklch(0.1 0.005 95 / .85);
+  border:1px solid var(--line);
+  padding:6px 10px;
+  z-index:2;
+  pointer-events:none;
+}
+.compare .tag.orig{right:12px}
+.compare .tag.vect{left:12px}
+
+/* processing overlay */
+.busy{
+  position:absolute;inset:0;z-index:5;
+  display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:16px;
+  background:oklch(0.12 0.005 95 / .82);
+}
+.busy.on{display:flex}
+.busy .spinner{
+  width:36px;height:36px;
+  border:1px solid var(--line);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.busy .busy-label{font:500 11px/1 var(--font-mono);letter-spacing:.2em;text-transform:uppercase;color:var(--text)}
+
+/* stats + palette bar */
+.readout{
+  border-top:1px solid var(--line);
+  display:flex;flex-wrap:wrap;
+  background:var(--bg-panel);
+}
+.readout .cell{
+  flex:1 1 auto;
+  min-width:120px;
+  padding:14px 18px;
+  border-right:1px solid var(--line-soft);
+}
+.readout .cell:last-child{border-right:none}
+.readout .k{font:500 10px/1 var(--font-mono);letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px}
+.readout .v{font:500 15px/1.2 var(--font-mono);color:var(--text-strong)}
+.palette{
+  border-top:1px solid var(--line);
+  display:none;
+  align-items:center;gap:0;
+  overflow-x:auto;
+  background:var(--bg-panel);
+}
+.palette.on{display:flex}
+.palette .pl-k{
+  flex:none;
+  font:500 10px/1 var(--font-mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  padding:0 18px;
+}
+.palette .chip{
+  flex:none;width:44px;height:36px;
+  border-right:1px solid var(--line-soft);
+  position:relative;
+}
+.palette .chip:focus-visible{outline-offset:-2px}
+
+/* ---------- controls (right) ---------- */
+.controls{
+  display:flex;flex-direction:column;
+  background:var(--bg);
+  min-width:0;
+}
+.controls-head{
+  padding:18px 22px 14px;
+  border-bottom:1px solid var(--line);
+  font:500 11px/1 var(--font-mono);
+  letter-spacing:.2em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+.controls-body{flex:1;overflow-y:auto;padding:6px 22px 22px}
+.ctl{
+  padding:16px 0;
+  border-bottom:1px solid var(--line-soft);
+}
+.ctl:last-child{border-bottom:none}
+.ctl label,.ctl .lbl{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font:500 11px/1 var(--font-mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--text);
+  margin-bottom:12px;
+}
+.ctl .val{color:var(--accent);font:500 12px/1 var(--font-mono)}
+.ctl .hint{font:400 12px/1.5 var(--font-ui);color:var(--text-dim);margin-top:10px}
+
+select,input[type=text]{
+  width:100%;
+  font:500 13px/1 var(--font-mono);
+  color:var(--text-strong);
+  background:var(--bg-panel);
+  border:1px solid var(--line);
+  padding:12px 12px;
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  border-radius:0;
+}
+select:hover{border-color:var(--text-dim)}
+select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+input[type=range]{
+  width:100%;
+  appearance:none;
+  height:24px;
+  background:transparent;
+}
+input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line)}
+input[type=range]::-webkit-slider-thumb{
+  appearance:none;
+  width:13px;height:13px;
+  background:var(--accent);
+  border:none;border-radius:0;
+  margin-top:-6px;
+  cursor:ew-resize;
+}
+input[type=range]::-moz-range-track{height:1px;background:var(--line)}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;background:var(--accent);border:none;border-radius:0;cursor:ew-resize}
+
+.switch-row{
+  display:flex;justify-content:space-between;align-items:center;
+  font:500 11px/1 var(--font-mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--text);
+}
+.switch{
+  position:relative;
+  width:40px;height:22px;
+  border:1px solid var(--line);
+  background:var(--bg-panel);
+  flex:none;
+  transition:background .15s ease,border-color .15s ease;
+}
+.switch::after{
+  content:"";
+  position:absolute;top:3px;left:3px;
+  width:14px;height:14px;
+  background:var(--text-dim);
+  transition:transform .15s ease,background .15s ease;
+}
+.switch[aria-checked="true"]{background:var(--accent);border-color:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(18px);background:var(--accent-ink)}
+
+.actions{
+  border-top:1px solid var(--line);
+  padding:18px 22px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.btn{
+  font:500 12px/1 var(--font-mono);
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  padding:15px 18px;
+  border:1px solid var(--line);
+  background:transparent;
+  color:var(--text-strong);
+  text-align:center;
+  transition:border-color .15s ease,color .15s ease,background .15s ease,transform .1s ease;
+}
+.btn:hover:not(:disabled){border-color:var(--text-strong)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover:not(:disabled){background:oklch(0.68 0.2 268);border-color:oklch(0.68 0.2 268)}
+.btn-row{display:flex;gap:10px}
+.btn-row .btn{flex:1}
+
+/* footer */
+footer{
+  position:relative;z-index:1;
+  border-top:1px solid var(--line);
+  padding:16px 24px;
+  display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  font:400 11px/1.6 var(--font-mono);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+}
+
+/* toast */
+.toast{
+  position:fixed;left:50%;bottom:28px;
+  transform:translate(-50%,20px);
+  font:500 12px/1 var(--font-mono);
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-strong);
+  background:var(--bg-panel);
+  border:1px solid var(--danger);
+  padding:14px 22px;
+  z-index:10;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .2s ease,transform .2s ease;
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.ok{border-color:var(--accent)}
+
+@media (max-width:900px){
+  body{height:auto;overflow:visible}
+  header{height:auto;padding:14px 16px;gap:12px}
+  .head-meta{display:none}
+  .stage{min-height:320px;padding:16px}
+  .controls-body{overflow:visible}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+      <circle cx="13" cy="13" r="2.4" fill="oklch(0.62 0.21 268)"/>
+      <g stroke="oklch(0.78 0.005 95)" stroke-width="1.4">
+        <line x1="13" y1="1" x2="13" y2="7"/>
+        <line x1="13" y1="19" x2="13" y2="25"/>
+        <line x1="1" y1="13" x2="7" y2="13"/>
+        <line x1="19" y1="13" x2="25" y2="13"/>
+        <line x1="4.5" y1="4.5" x2="8.7" y2="8.7"/>
+        <line x1="17.3" y1="17.3" x2="21.5" y2="21.5"/>
+        <line x1="21.5" y1="4.5" x2="17.3" y2="8.7"/>
+        <line x1="8.7" y1="17.3" x2="4.5" y2="21.5"/>
+      </g>
+    </svg>
+    <span class="wordmark">IMG<span class="arrow">→</span>SVG</span>
+  </div>
+  <span class="engine-tag">Engine · ImageTracer 1.2.6</span>
+  <div class="head-meta">
+    <span><span class="dot" aria-hidden="true"></span>Runs 100% in browser</span>
+    <span>No uploads · No server</span>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: workspace -->
+  <section class="workspace" aria-label="Preview workspace">
+    <div class="stage" id="stage">
+      <div class="dropzone" id="dropzone" role="button" tabindex="0"
+           aria-label="Upload an image. Press Enter to browse files.">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" aria-hidden="true">
+          <rect x="4" y="8" width="36" height="28" stroke="oklch(0.58 0.005 95)" stroke-width="1.4"/>
+          <circle cx="15" cy="18" r="3" stroke="oklch(0.58 0.005 95)" stroke-width="1.4"/>
+          <path d="M4 32l10-9 8 7 8-9 10 11" stroke="oklch(0.62 0.21 268)" stroke-width="1.4" fill="none"/>
+        </svg>
+        <div class="dz-title">Drop an image here</div>
+        <div class="dz-sub">PNG · JPG · WebP · GIF · BMP</div>
+        <span class="dz-browse">Browse files</span>
+      </div>
+
+      <div class="compare" id="compare" aria-label="Original and vectorized image comparison">
+        <div class="layer orig-layer"><img id="origImg" alt="Original raster image"></div>
+        <div class="layer svg-layer" id="svgLayer" aria-label="Vectorized SVG preview"></div>
+        <span class="tag vect">Vector · SVG</span>
+        <span class="tag orig">Original</span>
+        <div class="divider" id="divider" role="slider" tabindex="0"
+             aria-label="Comparison split position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"></div>
+      </div>
+
+      <div class="busy" id="busy" aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <div class="busy-label">Tracing pixels</div>
+      </div>
+    </div>
+
+    <div class="readout" id="readout" aria-live="polite">
+      <div class="cell"><div class="k">Dimensions</div><div class="v" id="stDims">—</div></div>
+      <div class="cell"><div class="k">Paths</div><div class="v" id="stPaths">—</div></div>
+      <div class="cell"><div class="k">Colors</div><div class="v" id="stColors">—</div></div>
+      <div class="cell"><div class="k">SVG size</div><div class="v" id="stSize">—</div></div>
+      <div class="cell"><div class="k">Trace time</div><div class="v" id="stTime">—</div></div>
+    </div>
+
+    <div class="palette" id="palette" aria-label="Extracted color palette">
+      <span class="pl-k">Palette</span>
+    </div>
+  </section>
+
+  <!-- RIGHT: controls -->
+  <aside class="controls" aria-label="Conversion settings">
+    <div class="controls-head">Trace Parameters</div>
+    <div class="controls-body">
+
+      <div class="ctl">
+        <label for="preset"><span>Preset</span></label>
+        <select id="preset">
+          <option value="poster" selected>Poster — flat color shapes</option>
+          <option value="photo">Photo — detailed color</option>
+          <option value="gray">Grayscale</option>
+          <option value="line">Line art — edges only</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div class="hint">Starting point for the parameters below. Editing any parameter switches to Custom.</div>
+      </div>
+
+      <div class="ctl">
+        <label for="colors"><span>Colors</span><span class="val" id="colorsVal">8</span></label>
+        <input type="range" id="colors" min="2" max="32" step="1" value="8" aria-label="Number of colors">
+      </div>
+
+      <div class="ctl">
+        <label for="detail"><span>Curve detail</span><span class="val" id="detailVal">1.0</span></label>
+        <input type="range" id="detail" min="0.3" max="4" step="0.1" value="1" aria-label="Curve detail threshold">
+        <div class="hint">Higher values smooth the curves — smaller files, less fidelity.</div>
+      </div>
+
+      <div class="ctl">
+        <label for="noise"><span>Noise filter</span><span class="val" id="noiseVal">8 px</span></label>
+        <input type="range" id="noise" min="0" max="64" step="1" value="8" aria-label="Noise filter, minimum path length">
+        <div class="hint">Discards specks shorter than this. Raise it for noisy photos.</div>
+      </div>
+
+      <div class="ctl">
+        <label for="blur"><span>Pre-blur</span><span class="val" id="blurVal">0</span></label>
+        <input type="range" id="blur" min="0" max="5" step="1" value="0" aria-label="Gaussian blur radius before tracing">
+      </div>
+
+      <div class="ctl">
+        <div class="switch-row">
+          <span>Line filter</span>
+          <button class="switch" id="linefilter" role="switch" aria-checked="false" aria-label="Line filter"></button>
+        </div>
+        <div class="hint">Replaces tiny shapes with strokes — good for line art.</div>
+      </div>
+
+      <div class="ctl">
+        <div class="switch-row">
+          <span>Right-angle enhance</span>
+          <button class="switch" id="rightangle" role="switch" aria-checked="true" aria-label="Enhance right angles"></button>
+        </div>
+        <div class="hint">Sharpens corners on geometric artwork.</div>
+      </div>
+
+      <div class="ctl">
+        <div class="switch-row">
+          <span>Grayscale source</span>
+          <button class="switch" id="graysrc" role="switch" aria-checked="false" aria-label="Convert source to grayscale"></button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" id="downloadBtn" disabled>Download SVG</button>
+      <div class="btn-row">
+        <button class="btn" id="copyBtn" disabled>Copy code</button>
+        <button class="btn" id="replaceBtn">New image</button>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span>Raster → vector · color quantization + edge tracing</span>
+  <span>Your image never leaves this device</span>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif" hidden>
+<script src="./vendor/imagetracer_v1.2.6.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
